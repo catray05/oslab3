@@ -12,7 +12,8 @@
 #define SEM_NAME "/shared_sem"
 
 typedef struct {
-    string commname;
+    sem_t mutex;
+    char name[10];
     double price;
 } SharedBuffer;
 
@@ -20,7 +21,6 @@ using namespace std;
 int main(int argc, char* argv[]){
     int size=atoi(argv[1]);
 
-    sem_t mutex;
     sem_t *buffer = sem_open(SEM_NAME, O_CREAT, 0666, 0);
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
@@ -30,19 +30,24 @@ int main(int argc, char* argv[]){
     ftruncate(shm_fd, size);
 
     SharedBuffer *buff=static_cast<SharedBuffer *>(mmap(NULL, size*sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)); //normal func(no cast) doesnt work in c++ :( only c
+    if (buff == MAP_FAILED) {
+        perror("mmap failed");
+        exit(1);
+    }
     close(shm_fd);
-
+    double avg;
     while(true){
+        sem_wait(buffer);
         printf("+--------------------------------------+\n");
         printf("| Currency  |   Price   |   AvgPrice   |\n");
         printf("+--------------------------------------+\n");
         // !!critical section!!
-        sem_wait(&mutex);
+        sem_wait(&buff->mutex);
         while(true){
-            printf("| ALUMINIUM |   199.00  |   249.00     |\n");
+            printf("| %s |   %f  |   %f     |\n",buff->name,buff->price,avg);
 
         }
-        sem_post(&mutex);
+        sem_post(&buff->mutex);
         printf("+--------------------------------------+\n");
     }
 
