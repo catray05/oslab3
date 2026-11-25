@@ -15,11 +15,13 @@ typedef struct {
     sem_t mutex;
     char name[10];
     double price;
+    int elements;
 } SharedBuffer;
 
 using namespace std;
 int main(int argc, char* argv[]){
     int size=atoi(argv[1]);
+    double avg;
 
     sem_t *buffer = sem_open(SEM_NAME, O_CREAT, 0666, 0);
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
@@ -35,21 +37,21 @@ int main(int argc, char* argv[]){
         exit(1);
     }
     close(shm_fd);
-    double avg;
-    while(true){
-        sem_wait(buffer);
-        printf("+--------------------------------------+\n");
-        printf("| Currency  |   Price   |   AvgPrice   |\n");
-        printf("+--------------------------------------+\n");
+    fprintf(stdout,"+--------------------------------------+\n");
+    fprintf(stdout,"| Currency  |   Price   |   AvgPrice   |\n");
+    fprintf(stdout,"+--------------------------------------+\n");
+    sem_wait(buffer);
+    while(buff->elements){
         // !!critical section!!
         sem_wait(&buff->mutex);
-        while(true){
-            printf("| %s |   %f  |   %f     |\n",buff->name,buff->price,avg);
-
-        }
+        fprintf(stdout,"| %s |   %f  |   %f     |\n",buff->name,buff->price,avg);
+        buff->elements--;
         sem_post(&buff->mutex);
-        printf("+--------------------------------------+\n");
     }
-
+    sem_post(buffer);
+    fprintf(stdout,"+--------------------------------------+\n");
+    sem_close(&buff->mutex);
+    sem_unlink(SEM_NAME);
+    shm_unlink(SHM_NAME);
     return 0;
 }

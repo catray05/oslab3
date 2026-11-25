@@ -16,6 +16,7 @@ typedef struct {
     sem_t mutex;
     char name[10];
     double price;
+    int elements;
 } SharedBuffer;
 
 void timern(time_t now, timespec ts){
@@ -61,7 +62,7 @@ int main(int argc, char* argv[]){
     sem_init(&buff->mutex,1,0);
 
     // EL MFROOD EL PRINTING DAH FL STDERR AGGHDFJKWEGFK
-    while(true){
+    while(buff->elements!=size){
         sem_wait(buffer);
         clock_gettime(CLOCK_MONOTONIC,&currtime);
         now=time(NULL);
@@ -79,6 +80,7 @@ int main(int argc, char* argv[]){
         fprintf(stderr,"%s: placing %f on shared buffer\n", commname.c_str(), price);
         buff->price=price;
         strcpy(buff->name,commname.c_str());
+        buff->elements++;
         sem_post(&buff->mutex);
         // !!end of critical section!!
         clock_gettime(CLOCK_MONOTONIC,&currtime);
@@ -88,8 +90,8 @@ int main(int argc, char* argv[]){
         sleep(sleepint/1000);
         sem_post(buffer);
     }
-    // sem_close(SEM_NAME);
-    // sem_unlink(SEM_NAME);
-    // shm_unlink(SHM_NAME); idk h7ottaha fein lssa bs kda unreachable 34an el loop
+    sem_close(&buff->mutex);
+    sem_unlink(SEM_NAME);
+    shm_unlink(SHM_NAME);
     return 0;
 }
