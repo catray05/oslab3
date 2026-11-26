@@ -7,25 +7,38 @@
 #include <random>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
+#include <thread>
+#include <chrono>
 
 #define SHM_NAME "/shared_buffer"
 #define SEM_NAME "/shared_sem"
 
-typedef struct {
+typedef struct{
     sem_t mutex;
-    char name[11];
-    double price;
-    int elements;
     sem_t empty;
     sem_t full;
+    int read;
+    int write;
+}SharedControl;
+typedef struct {
+    char name[11];
+    double price;
 } SharedBuffer;
+typedef struct{
+    char name[11];
+    double currprice=0.00;
+    double prevprice=0.00;
+    double last[5];
+}Dashboard;
 
 using namespace std;
 int main(int argc, char* argv[]){
     int size=atoi(argv[1]);
     double avg;
+    Dashboard *dash[11];
 
-    sem_t *buffer = sem_open(SEM_NAME, O_CREAT, 0666, 0);
+    // sem_t *buffer = sem_open(SEM_NAME, O_CREAT, 0666, 0);
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
         perror("shm_open failed");
@@ -33,26 +46,36 @@ int main(int argc, char* argv[]){
     }
     ftruncate(shm_fd, size);
 
-    SharedBuffer *buff=static_cast<SharedBuffer *>(mmap(NULL, size*sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)); //normal func(no cast) doesnt work in c++ :( only c
-    if (buff == MAP_FAILED) {
+    SharedControl *cont=static_cast<SharedControl *>(mmap(NULL, sizeof(SharedControl)+size*sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)); //normal func(no cast) doesnt work in c++ :( only c
+    if (cont == MAP_FAILED) {
         perror("mmap failed");
         exit(1);
     }
+    SharedBuffer *buff=(SharedBuffer *)(cont+sizeof(SharedControl));
     close(shm_fd);
+
+    sem_init(&cont->mutex,1,1);
+    sem_init(&cont->empty,1,size);
+    sem_init(&cont->full,1,0);
     fprintf(stdout,"+--------------------------------------+\n");
     fprintf(stdout,"| Currency  |   Price   |   AvgPrice   |\n");
     fprintf(stdout,"+--------------------------------------+\n");
-    sem_wait(buffer);
-    while(buff->elements){
+    while(true){
+        sem_wait(&cont->full);
         // !!critical section!!
-        sem_wait(&buff->mutex);
-        fprintf(stdout,"| %s |   %f  |   %f     |\n",buff->name,buff->price,avg);
-        buff->elements--;
-        sem_post(&buff->mutex);
+        sem_wait(&cont->mutex);
+        fprintf(stdout,"| %s |   %f  |   %f     |\n",buff[cont->read].name,buff[cont->read].price,avg);
+        strcpy(dash[cont->read]->name,buff[cont->read].name);
+        
+        dash[cont->read]->currprice=buff[cont->read].price;
+
+        cont->read=(cont->read+1)%size;
+        sem_post(&cont->mutex);
+        // !!end of critical section!!
+        sem_post(&cont->empty);
+        fprintf(stdout,"+--------------------------------------+\n");
     }
-    sem_post(buffer);
-    fprintf(stdout,"+--------------------------------------+\n");
-    sem_close(&buff->mutex);
+    sem_close(&cont->mutex);
     sem_unlink(SEM_NAME);
     shm_unlink(SHM_NAME);
     return 0;

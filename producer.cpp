@@ -15,13 +15,16 @@
 #define SEM_NAME "/shared_sem"
 
 
-typedef struct {
+typedef struct{
     sem_t mutex;
-    char name[11];
-    double price;
-    int elements;
     sem_t empty;
     sem_t full;
+    int read;
+    int write;
+}SharedControl;
+typedef struct {
+    char name[11];
+    double price;
 } SharedBuffer;
 
 void timern(time_t now, timespec ts){
@@ -32,7 +35,7 @@ void timern(time_t now, timespec ts){
     int hour=t->tm_hour;
     int min=t->tm_min;
     int sec=t->tm_sec;
-    long millisec=ts.tv_nsec/1000;
+    long millisec=ts.tv_nsec/1e+6;
     fprintf(stderr,"[%d/%d/%d %d:%d:%d.%ld]",month,day,year,hour,min,sec,millisec);
 }
 
@@ -54,21 +57,22 @@ int main(int argc, char* argv[]){
         perror("shm_open failed");
         exit(1);
     }
-    ftruncate(shm_fd, sizeof(SharedBuffer));
+    ftruncate(shm_fd, sizeof(SharedControl)+size*sizeof(SharedBuffer));
 
-    SharedBuffer *buff=static_cast<SharedBuffer *>(mmap(NULL, sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)); //normal func(no cast) doesnt work in c++ :( only c
-    if (buff == MAP_FAILED) {
+    SharedControl *cont=static_cast<SharedControl *>(mmap(NULL, sizeof(SharedControl)+size*sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)); //normal func(no cast) doesnt work in c++ :( only c
+    if (cont == MAP_FAILED) {
         perror("mmap failed");
         exit(1);
     }
+    SharedBuffer *buff=(SharedBuffer *)(cont+sizeof(SharedControl));
     close(shm_fd);
 
-    sem_init(&buff->mutex,1,1);
-    sem_init(&buff->empty,1,size);
-    sem_init(&buff->full,1,0);
+    sem_init(&cont->mutex,1,1);
+    sem_init(&cont->empty,1,size);
+    sem_init(&cont->full,1,0);
     // EL MFROOD EL PRINTING DAH FL STDERR AGGHDFJKWEGFK
-    while(buff->elements!=size){
-        sem_wait(&buff->empty);
+    while(true){
+        sem_wait(&cont->empty);
         clock_gettime(CLOCK_REALTIME,&currtime);
         now=time(NULL);
         timern(now,currtime);
@@ -79,26 +83,23 @@ int main(int argc, char* argv[]){
         timern(now,currtime);
         fprintf(stderr," %s: trying to get mutex on shared buffer\n", commname.c_str());
         // !!critical section!!
-        sem_wait(&buff->mutex);
+        sem_wait(&cont->mutex);
         clock_gettime(CLOCK_REALTIME,&currtime);
         now=time(NULL);
         timern(now,currtime);
         fprintf(stderr," %s: placing %7.2lf on shared buffer\n", commname.c_str(), price);
-        buff->price=price;
-        strcpy(buff->name,commname.c_str());
-        buff->elements++;
-        sem_post(&buff->mutex);
+        buff[cont->write].price=price;
+        strcpy(buff[cont->write].name,commname.c_str());
+        cont->write=(cont->write+1)%size;
+        sem_post(&cont->mutex);
         // !!end of critical section!!
+        sem_post(&cont->full);
         clock_gettime(CLOCK_REALTIME,&currtime);
         now=time(NULL);
         timern(now,currtime);
         fprintf(stderr," %s: sleeping for %d ms\n", commname.c_str(), sleepint);
         // sleep(sleepint/1000); lw 200 hy sleep 0 :[
         this_thread::sleep_for(chrono::milliseconds(sleepint));
-        sem_post(&buff->full);
     }
-    sem_close(&buff->mutex);
-    sem_unlink(SEM_NAME);
-    shm_unlink(SHM_NAME);
     return 0;
 }
