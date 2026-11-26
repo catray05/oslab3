@@ -13,9 +13,11 @@
 
 typedef struct {
     sem_t mutex;
-    char name[10];
+    char name[11];
     double price;
     int elements;
+    sem_t empty;
+    sem_t full;
 } SharedBuffer;
 
 using namespace std;

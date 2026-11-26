@@ -8,15 +8,20 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <thread>
+#include <chrono>
 
 #define SHM_NAME "/shared_buffer"
 #define SEM_NAME "/shared_sem"
 
+
 typedef struct {
     sem_t mutex;
-    char name[10];
+    char name[11];
     double price;
     int elements;
+    sem_t empty;
+    sem_t full;
 } SharedBuffer;
 
 void timern(time_t now, timespec ts){
@@ -27,8 +32,8 @@ void timern(time_t now, timespec ts){
     int hour=t->tm_hour;
     int min=t->tm_min;
     int sec=t->tm_sec;
-    long nanosec=ts.tv_nsec;
-    fprintf(stderr,"[%d:%d:%d %d:%d:%d.%ld]",month,day,year,hour,min,sec,nanosec);
+    long millisec=ts.tv_nsec/1000;
+    fprintf(stderr,"[%d/%d/%d %d:%d:%d.%ld]",month,day,year,hour,min,sec,millisec);
 }
 
 using namespace std;
@@ -40,55 +45,57 @@ int main(int argc, char* argv[]){
     int size=atoi(argv[5]);
     default_random_engine generator;
     normal_distribution<double> distribution(pricemean,pricestddev);
-    double price=distribution(generator);
+    double price;
     struct timespec currtime;
     time_t now;
 
-    sem_t *buffer = sem_open(SEM_NAME, O_CREAT, 0666, 0);
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
         perror("shm_open failed");
         exit(1);
     }
-    ftruncate(shm_fd, size*sizeof(SharedBuffer));
+    ftruncate(shm_fd, sizeof(SharedBuffer));
 
-    SharedBuffer *buff=static_cast<SharedBuffer *>(mmap(NULL, size*sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)); //normal func(no cast) doesnt work in c++ :( only c
+    SharedBuffer *buff=static_cast<SharedBuffer *>(mmap(NULL, sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)); //normal func(no cast) doesnt work in c++ :( only c
     if (buff == MAP_FAILED) {
         perror("mmap failed");
         exit(1);
     }
     close(shm_fd);
 
-    sem_init(&buff->mutex,1,0);
-
+    sem_init(&buff->mutex,1,1);
+    sem_init(&buff->empty,1,size);
+    sem_init(&buff->full,1,0);
     // EL MFROOD EL PRINTING DAH FL STDERR AGGHDFJKWEGFK
     while(buff->elements!=size){
-        sem_wait(buffer);
-        clock_gettime(CLOCK_MONOTONIC,&currtime);
+        sem_wait(&buff->empty);
+        clock_gettime(CLOCK_REALTIME,&currtime);
         now=time(NULL);
         timern(now,currtime);
-        fprintf(stderr,"%s: generating a new value %f\n", commname.c_str(), price);
-        clock_gettime(CLOCK_MONOTONIC,&currtime);
+        price=distribution(generator);
+        fprintf(stderr," %s: generating a new value %7.2lf\n", commname.c_str(), price);
+        clock_gettime(CLOCK_REALTIME,&currtime);
         now=time(NULL);
         timern(now,currtime);
-        fprintf(stderr,"%s: trying to get mutex on shared buffer\n", commname.c_str());
+        fprintf(stderr," %s: trying to get mutex on shared buffer\n", commname.c_str());
         // !!critical section!!
         sem_wait(&buff->mutex);
-        clock_gettime(CLOCK_MONOTONIC,&currtime);
+        clock_gettime(CLOCK_REALTIME,&currtime);
         now=time(NULL);
         timern(now,currtime);
-        fprintf(stderr,"%s: placing %f on shared buffer\n", commname.c_str(), price);
+        fprintf(stderr," %s: placing %7.2lf on shared buffer\n", commname.c_str(), price);
         buff->price=price;
         strcpy(buff->name,commname.c_str());
         buff->elements++;
         sem_post(&buff->mutex);
         // !!end of critical section!!
-        clock_gettime(CLOCK_MONOTONIC,&currtime);
+        clock_gettime(CLOCK_REALTIME,&currtime);
         now=time(NULL);
         timern(now,currtime);
-        fprintf(stderr,"%s: sleeping for %d ms", buff->name, sleepint);
-        sleep(sleepint/1000);
-        sem_post(buffer);
+        fprintf(stderr," %s: sleeping for %d ms\n", commname.c_str(), sleepint);
+        // sleep(sleepint/1000); lw 200 hy sleep 0 :[
+        this_thread::sleep_for(chrono::milliseconds(sleepint));
+        sem_post(&buff->full);
     }
     sem_close(&buff->mutex);
     sem_unlink(SEM_NAME);
