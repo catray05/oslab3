@@ -64,7 +64,7 @@ int main(int argc, char* argv[]){
         perror("mmap failed");
         exit(1);
     }
-    SharedBuffer *buff=(SharedBuffer *)(cont+sizeof(SharedControl));
+    SharedBuffer *buff=(SharedBuffer *)((char*)cont+sizeof(SharedControl));
     close(shm_fd);
 
     sem_init(&cont->mutex,1,1);

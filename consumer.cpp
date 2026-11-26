@@ -44,19 +44,17 @@ int main(int argc, char* argv[]){
         perror("shm_open failed");
         exit(1);
     }
-    ftruncate(shm_fd, size);
+    ftruncate(shm_fd, sizeof(SharedControl)+size*sizeof(SharedBuffer));
 
     SharedControl *cont=static_cast<SharedControl *>(mmap(NULL, sizeof(SharedControl)+size*sizeof(SharedBuffer), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0)); //normal func(no cast) doesnt work in c++ :( only c
     if (cont == MAP_FAILED) {
         perror("mmap failed");
         exit(1);
     }
-    SharedBuffer *buff=(SharedBuffer *)(cont+sizeof(SharedControl));
+    SharedBuffer *buff=(SharedBuffer *)((char*)cont+sizeof(SharedControl));
     close(shm_fd);
 
-    sem_init(&cont->mutex,1,1);
-    sem_init(&cont->empty,1,size);
-    sem_init(&cont->full,1,0);
+    fprintf(stdout,"\e[1;1H\e[2J");
     fprintf(stdout,"+--------------------------------------+\n");
     fprintf(stdout,"| Currency  |   Price   |   AvgPrice   |\n");
     fprintf(stdout,"+--------------------------------------+\n");
@@ -65,9 +63,9 @@ int main(int argc, char* argv[]){
         // !!critical section!!
         sem_wait(&cont->mutex);
         fprintf(stdout,"| %s |   %f  |   %f     |\n",buff[cont->read].name,buff[cont->read].price,avg);
-        strcpy(dash[cont->read]->name,buff[cont->read].name);
+        // strcpy(dash[cont->read]->name,buff[cont->read].name);
         
-        dash[cont->read]->currprice=buff[cont->read].price;
+        // dash[cont->read]->currprice=buff[cont->read].price;
 
         cont->read=(cont->read+1)%size;
         sem_post(&cont->mutex);
