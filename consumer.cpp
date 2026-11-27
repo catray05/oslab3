@@ -12,12 +12,11 @@
 #include <chrono>
 
 #define SHM_NAME "/shared_buffer"
-#define SEM_NAME "/shared_sem"
+#define SEM_MUTEX "/shared_mutex"
+#define SEM_FULL "/shared_full"
+#define SEM_EMPTY "/shared_empty"
 
 typedef struct{
-    sem_t mutex;
-    sem_t empty;
-    sem_t full;
     int read;
     int write;
 }SharedControl;
@@ -27,17 +26,37 @@ typedef struct {
 } SharedBuffer;
 typedef struct{
     char name[11];
-    double currprice=0.00;
-    double prevprice=0.00;
+    double currprice;
+    double prevprice;
+    double prevavg;
     double last[5];
+    int next;
+    int count;
+    int avgarw;
+    int pricearw;
 }Dashboard;
 
 using namespace std;
 int main(int argc, char* argv[]){
     int size=atoi(argv[1]);
     double avg;
-    Dashboard *dash[11];
-
+    char name[11];
+    double price;
+    int idx;
+    double sum;
+    Dashboard dash[11]={
+        {"ALUMINIUM"},
+        {"COPPER"},
+        {"COTTON"},
+        {"CRUDEOIL"},
+        {"GOLD"},
+        {"LEAD"},
+        {"MENTHAOIL"},
+        {"NATURALGAS"},
+        {"NICKEL"},
+        {"SILVER"},
+        {"ZINC"}
+    };
     // sem_t *buffer = sem_open(SEM_NAME, O_CREAT, 0666, 0);
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
@@ -53,28 +72,90 @@ int main(int argc, char* argv[]){
     }
     SharedBuffer *buff=(SharedBuffer *)((char*)cont+sizeof(SharedControl));
     close(shm_fd);
+    sem_t *mutex = sem_open(SEM_MUTEX, O_CREAT, 0666, 1);
+    sem_t *empty = sem_open(SEM_EMPTY, O_CREAT, 0666, size);
+    sem_t *full = sem_open(SEM_FULL, O_CREAT, 0666, 0);
 
-    fprintf(stdout,"\e[1;1H\e[2J");
-    fprintf(stdout,"+--------------------------------------+\n");
-    fprintf(stdout,"| Currency  |   Price   |   AvgPrice   |\n");
-    fprintf(stdout,"+--------------------------------------+\n");
     while(true){
-        sem_wait(&cont->full);
+        sem_wait(full);
         // !!critical section!!
-        sem_wait(&cont->mutex);
-        fprintf(stdout,"| %s|%7.2lf    |%7.2lf       |\n",buff[cont->read].name,buff[cont->read].price,avg);
-        // strcpy(dash[cont->read]->name,buff[cont->read].name);
-        
-        // dash[cont->read]->currprice=buff[cont->read].price;
-
+        sem_wait(mutex);
+        idx=-1;
+        strcpy(name,buff[cont->read].name);
+        price=buff[cont->read].price;
         cont->read=(cont->read+1)%size;
-        sem_post(&cont->mutex);
+        sem_post(mutex);
         // !!end of critical section!!
-        sem_post(&cont->empty);
-        fprintf(stdout,"+--------------------------------------+\n");
+        sem_post(empty);
+        for(int i=0;i<11;i++){
+            if(!strcmp(name,dash[i].name))
+                idx=i;
+        }
+        if(idx==-1)
+            continue;
+        dash[idx].last[dash[idx].next]=price;
+        dash[idx].next=(dash[idx].next+1)%5;
+        dash[idx].count=min((dash[idx].count+1),5);
+        dash[idx].prevprice=dash[idx].currprice;
+        dash[idx].currprice=price;
+        sum=0.00;
+        for(int i=0;i<dash[idx].count;i++){
+            sum+=dash[idx].last[i];
+        }
+        avg=sum/dash[idx].count;
+        if(dash[idx].count>1){
+            if(dash[idx].currprice>dash[idx].prevprice)
+            dash[idx].pricearw=1;
+            else if(dash[idx].currprice<dash[idx].prevprice)
+            dash[idx].pricearw=-1;
+            else dash[idx].pricearw=0;
+            if(avg>dash[idx].prevavg)
+            dash[idx].avgarw=1;
+            else if(avg<dash[idx].prevavg)
+            dash[idx].avgarw=-1;
+            else dash[idx].avgarw=0;
+        }
+        else{
+            dash[idx].avgarw=0;
+            dash[idx].pricearw=0;
+        }
+        dash[idx].prevavg=avg;
+        fprintf(stdout,"\e[1;1H\e[2J");
+        fprintf(stdout,"+---------------------------------------+\n");
+        fprintf(stdout,"| Currency   |   Price   |   AvgPrice   |\n");
+        fprintf(stdout,"+---------------------------------------+\n");
+        const char* pricearw;
+        const char* avgarw;
+        int pricecolor;
+        int avgcolor;
+        for(int i=0;i<11;i++){
+            pricecolor=36;
+            avgcolor=36;
+            if(dash[i].pricearw==1){
+                pricearw="↑";
+                pricecolor=32;
+            }
+            else if(dash[i].pricearw==-1){
+                pricearw="↓";
+                pricecolor=31;
+            }
+            else{
+                pricearw=" ";
+            }
+            if(dash[i].avgarw==1){
+                avgarw="↑";
+                avgcolor=32;
+            }
+            else if(dash[i].avgarw==-1){
+                avgarw="↓";
+                avgcolor=31;
+            }
+            else{
+                avgarw=" ";
+            }
+            fprintf(stdout,"| %-10s |\033[;%dm%7.2lf%s\033[0m   |\033[%dm%7.2lf%s\033[0m      |\n",dash[i].name,pricecolor,dash[i].currprice,pricearw,avgcolor,dash[i].prevavg,avgarw);
+        }
+        fprintf(stdout,"+---------------------------------------+\n");
     }
-    sem_close(&cont->mutex);
-    sem_unlink(SEM_NAME);
-    shm_unlink(SHM_NAME);
     return 0;
 }

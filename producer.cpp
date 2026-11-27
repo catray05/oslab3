@@ -12,13 +12,12 @@
 #include <chrono>
 
 #define SHM_NAME "/shared_buffer"
-#define SEM_NAME "/shared_sem"
+#define SEM_MUTEX "/shared_mutex"
+#define SEM_FULL "/shared_full"
+#define SEM_EMPTY "/shared_empty"
 
 
 typedef struct{
-    sem_t mutex;
-    sem_t empty;
-    sem_t full;
     int read;
     int write;
 }SharedControl;
@@ -27,8 +26,8 @@ typedef struct {
     double price;
 } SharedBuffer;
 
-void timern(time_t now, timespec ts){
-    struct tm *t=localtime(&now);
+void timern(timespec ts){
+    struct tm *t=localtime(&ts.tv_sec);
     int year=t->tm_year+1900;
     int month=t->tm_mon+1;
     int day=t->tm_mday;
@@ -36,12 +35,14 @@ void timern(time_t now, timespec ts){
     int min=t->tm_min;
     int sec=t->tm_sec;
     long millisec=ts.tv_nsec/1e+6;
-    fprintf(stderr,"[%d/%d/%d %d:%d:%d.%ld]",month,day,year,hour,min,sec,millisec);
+    fprintf(stderr,"[%02d/%02d/%d %02d:%02d:%02d.%03ld]",month,day,year,hour,min,sec,millisec);
 }
 
 using namespace std;
 int main(int argc, char* argv[]){
     string commname=argv[1];
+    for(int i=0;i<commname.length();i++)
+        commname[i]=toupper(commname[i]);
     double pricemean=atof(argv[2]);
     double pricestddev=atof(argv[3]);
     int sleepint=atoi(argv[4]);
@@ -50,7 +51,6 @@ int main(int argc, char* argv[]){
     normal_distribution<double> distribution(pricemean,pricestddev);
     double price;
     struct timespec currtime;
-    time_t now;
 
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
@@ -66,37 +66,33 @@ int main(int argc, char* argv[]){
     }
     SharedBuffer *buff=(SharedBuffer *)((char*)cont+sizeof(SharedControl));
     close(shm_fd);
-
-    sem_init(&cont->mutex,1,1);
-    sem_init(&cont->empty,1,size);
-    sem_init(&cont->full,1,0);
+    sem_t *mutex = sem_open(SEM_MUTEX, O_CREAT, 0666, 1);
+    sem_t *empty = sem_open(SEM_EMPTY, O_CREAT, 0666, size);
+    sem_t *full = sem_open(SEM_FULL, O_CREAT, 0666, 0);
+    
     // EL MFROOD EL PRINTING DAH FL STDERR AGGHDFJKWEGFK
     while(true){
-        sem_wait(&cont->empty);
+        sem_wait(empty);
         clock_gettime(CLOCK_REALTIME,&currtime);
-        now=time(NULL);
-        timern(now,currtime);
+        timern(currtime);
         price=distribution(generator);
         fprintf(stderr," %s: generating a new value %7.2lf\n", commname.c_str(), price);
         clock_gettime(CLOCK_REALTIME,&currtime);
-        now=time(NULL);
-        timern(now,currtime);
+        timern(currtime);
         fprintf(stderr," %s: trying to get mutex on shared buffer\n", commname.c_str());
         // !!critical section!!
-        sem_wait(&cont->mutex);
+        sem_wait(mutex);
         clock_gettime(CLOCK_REALTIME,&currtime);
-        now=time(NULL);
-        timern(now,currtime);
+        timern(currtime);
         fprintf(stderr," %s: placing %7.2lf on shared buffer\n", commname.c_str(), price);
         buff[cont->write].price=price;
         strcpy(buff[cont->write].name,commname.c_str());
         cont->write=(cont->write+1)%size;
-        sem_post(&cont->mutex);
+        sem_post(mutex);
         // !!end of critical section!!
-        sem_post(&cont->full);
+        sem_post(full);
         clock_gettime(CLOCK_REALTIME,&currtime);
-        now=time(NULL);
-        timern(now,currtime);
+        timern(currtime);
         fprintf(stderr," %s: sleeping for %d ms\n", commname.c_str(), sleepint);
         // sleep(sleepint/1000); lw 200 hy sleep 0 :[
         this_thread::sleep_for(chrono::milliseconds(sleepint));
