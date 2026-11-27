@@ -62,7 +62,7 @@ int main(int argc, char* argv[]){
         sem_wait(&cont->full);
         // !!critical section!!
         sem_wait(&cont->mutex);
-        fprintf(stdout,"| %s |   %f  |   %f     |\n",buff[cont->read].name,buff[cont->read].price,avg);
+        fprintf(stdout,"| %s|%7.2lf    |%7.2lf       |\n",buff[cont->read].name,buff[cont->read].price,avg);
         // strcpy(dash[cont->read]->name,buff[cont->read].name);
         
         // dash[cont->read]->currprice=buff[cont->read].price;
