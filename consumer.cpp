@@ -10,6 +10,7 @@
 #include <string.h>
 #include <thread>
 #include <chrono>
+#include <signal.h>
 
 #define SHM_NAME "/shared_buffer"
 #define SEM_MUTEX "/shared_mutex"
@@ -35,9 +36,57 @@ typedef struct{
     int avgarw;
     int pricearw;
 }Dashboard;
+int stop=0;
+void handler(int sig){
+    stop=1;
+}
+
+void drawdash(Dashboard dash[]){
+    fprintf(stdout,"\e[1;1H\e[2J");
+        fprintf(stdout,"+---------------------------------------+\n");
+        fprintf(stdout,"| Currency   |   Price   |   AvgPrice   |\n");
+        fprintf(stdout,"+---------------------------------------+\n");
+        const char* pricearw;
+        const char* avgarw;
+        int pricecolor;
+        int avgcolor;
+        for(int i=0;i<11;i++){
+            pricecolor=36;
+            avgcolor=36;
+            if(dash[i].pricearw==1){
+                pricearw="↑";
+                pricecolor=32;
+            }
+            else if(dash[i].pricearw==-1){
+                pricearw="↓";
+                pricecolor=31;
+            }
+            else{
+                pricearw=" ";
+            }
+            if(dash[i].avgarw==1){
+                avgarw="↑";
+                avgcolor=32;
+            }
+            else if(dash[i].avgarw==-1){
+                avgarw="↓";
+                avgcolor=31;
+            }
+            else{
+                avgarw=" ";
+            }
+            fprintf(stdout,"| %-10s |\033[;%dm%7.2lf%s\033[0m   |\033[%dm%7.2lf%s\033[0m      |\n",dash[i].name,pricecolor,dash[i].currprice,pricearw,avgcolor,dash[i].prevavg,avgarw);
+        }
+        fprintf(stdout,"+---------------------------------------+\n");
+}
 
 using namespace std;
 int main(int argc, char* argv[]){
+    struct sigaction sa;
+    sa.sa_handler=&handler;
+    sa.sa_flags=0;
+    sigaction(SIGINT,&sa,NULL);
+    sigaction(SIGTERM,&sa,NULL);
     int size=atoi(argv[1]);
     double avg;
     char name[11];
@@ -75,11 +124,13 @@ int main(int argc, char* argv[]){
     sem_t *mutex = sem_open(SEM_MUTEX, O_CREAT, 0666, 1);
     sem_t *empty = sem_open(SEM_EMPTY, O_CREAT, 0666, size);
     sem_t *full = sem_open(SEM_FULL, O_CREAT, 0666, 0);
-
-    while(true){
-        sem_wait(full);
+    drawdash(dash);
+    while(!stop){
+        if(sem_wait(full)==-1)
+            break;
         // !!critical section!!
-        sem_wait(mutex);
+        if(sem_wait(mutex)==-1)
+            break;
         idx=-1;
         strcpy(name,buff[cont->read].name);
         price=buff[cont->read].price;
@@ -120,42 +171,15 @@ int main(int argc, char* argv[]){
             dash[idx].pricearw=0;
         }
         dash[idx].prevavg=avg;
-        fprintf(stdout,"\e[1;1H\e[2J");
-        fprintf(stdout,"+---------------------------------------+\n");
-        fprintf(stdout,"| Currency   |   Price   |   AvgPrice   |\n");
-        fprintf(stdout,"+---------------------------------------+\n");
-        const char* pricearw;
-        const char* avgarw;
-        int pricecolor;
-        int avgcolor;
-        for(int i=0;i<11;i++){
-            pricecolor=36;
-            avgcolor=36;
-            if(dash[i].pricearw==1){
-                pricearw="↑";
-                pricecolor=32;
-            }
-            else if(dash[i].pricearw==-1){
-                pricearw="↓";
-                pricecolor=31;
-            }
-            else{
-                pricearw=" ";
-            }
-            if(dash[i].avgarw==1){
-                avgarw="↑";
-                avgcolor=32;
-            }
-            else if(dash[i].avgarw==-1){
-                avgarw="↓";
-                avgcolor=31;
-            }
-            else{
-                avgarw=" ";
-            }
-            fprintf(stdout,"| %-10s |\033[;%dm%7.2lf%s\033[0m   |\033[%dm%7.2lf%s\033[0m      |\n",dash[i].name,pricecolor,dash[i].currprice,pricearw,avgcolor,dash[i].prevavg,avgarw);
-        }
-        fprintf(stdout,"+---------------------------------------+\n");
+        drawdash(dash);
     }
+    sem_close(mutex);
+    sem_close(full);
+    sem_close(empty);
+    sem_unlink(SEM_EMPTY);
+    sem_unlink(SEM_FULL);
+    sem_unlink(SEM_MUTEX);
+    munmap(cont,sizeof(SharedControl)+size*sizeof(SharedBuffer));
+    shm_unlink(SHM_NAME);
     return 0;
 }

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <thread>
 #include <chrono>
+#include <signal.h>
 
 #define SHM_NAME "/shared_buffer"
 #define SEM_MUTEX "/shared_mutex"
@@ -37,9 +38,18 @@ void timern(timespec ts){
     long millisec=ts.tv_nsec/1e+6;
     fprintf(stderr,"[%02d/%02d/%d %02d:%02d:%02d.%03ld]",month,day,year,hour,min,sec,millisec);
 }
+int stop=0;
+void handler(int sig){
+    stop=1;
+}
 
 using namespace std;
 int main(int argc, char* argv[]){
+    struct sigaction sa;
+    sa.sa_handler=&handler;
+    sa.sa_flags=0;
+    sigaction(SIGTERM,&sa,NULL);
+    sigaction(SIGINT,&sa,NULL);
     string commname=argv[1];
     for(int i=0;i<commname.length();i++)
         commname[i]=toupper(commname[i]);
@@ -71,8 +81,9 @@ int main(int argc, char* argv[]){
     sem_t *full = sem_open(SEM_FULL, O_CREAT, 0666, 0);
     
     // EL MFROOD EL PRINTING DAH FL STDERR AGGHDFJKWEGFK
-    while(true){
-        sem_wait(empty);
+    while(!stop){
+        if(sem_wait(empty)==-1)
+            break;
         clock_gettime(CLOCK_REALTIME,&currtime);
         timern(currtime);
         price=distribution(generator);
@@ -81,7 +92,8 @@ int main(int argc, char* argv[]){
         timern(currtime);
         fprintf(stderr," %s: trying to get mutex on shared buffer\n", commname.c_str());
         // !!critical section!!
-        sem_wait(mutex);
+        if(sem_wait(mutex)==-1)
+            break;
         clock_gettime(CLOCK_REALTIME,&currtime);
         timern(currtime);
         fprintf(stderr," %s: placing %7.2lf on shared buffer\n", commname.c_str(), price);
@@ -97,5 +109,9 @@ int main(int argc, char* argv[]){
         // sleep(sleepint/1000); lw 200 hy sleep 0 :[
         this_thread::sleep_for(chrono::milliseconds(sleepint));
     }
+    sem_close(mutex);
+    sem_close(full);
+    sem_close(empty);
+    munmap(cont,sizeof(SharedControl)+size*sizeof(SharedBuffer));
     return 0;
 }
